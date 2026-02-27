@@ -110,41 +110,64 @@ def fetch_run_from_wandb(entity: str, project: str, run_id: str) -> Dict[str, An
     # Get most recent run
     run = runs[0]
 
-    # [VALIDATOR FIX - Attempt 1]
-    # [PROBLEM]: SummarySubDict objects from wandb API are not JSON serializable
-    # [CAUSE]: dict(run.summary) creates a dict with nested SummarySubDict values
-    # [FIX]: Recursively convert to plain dict and handle special numeric types
+    # [VALIDATOR FIX - Attempt 2]
+    # [PROBLEM]: Maximum recursion depth exceeded when converting wandb objects
+    # [CAUSE]: Previous convert_to_json_serializable function had infinite recursion on wandb.Summary objects
+    # [FIX]: Add recursion depth limit and use json.dumps/loads to safely serialize wandb objects
     #
     # [OLD CODE]:
-    # return {
-    #     "id": run.id,
-    #     "name": run.name,
-    #     "history": run.history(),
-    #     "summary": dict(run.summary),
-    #     "config": dict(run.config),
-    # }
+    # def convert_to_json_serializable(obj):
+    #     """Recursively convert wandb objects to JSON-serializable types."""
+    #     import math
+    #     if isinstance(obj, float):
+    #         if math.isnan(obj) or math.isinf(obj):
+    #             return str(obj)
+    #         return obj
+    #     elif isinstance(obj, dict):
+    #         return {k: convert_to_json_serializable(v) for k, v in obj.items()}
+    #     elif isinstance(obj, list):
+    #         return [convert_to_json_serializable(item) for item in obj]
+    #     elif isinstance(obj, (str, int, bool, type(None))):
+    #         return obj
+    #     elif hasattr(obj, "__dict__"):
+    #         return convert_to_json_serializable(obj.__dict__)
+    #     else:
+    #         return str(obj)
     #
     # [NEW CODE]:
-    def convert_to_json_serializable(obj):
-        """Recursively convert wandb objects to JSON-serializable types."""
+    def convert_to_json_serializable(obj, depth=0, max_depth=10):
+        """Recursively convert wandb objects to JSON-serializable types with depth limit."""
         import math
+
+        # Prevent infinite recursion
+        if depth > max_depth:
+            return str(obj)
 
         # Handle special numeric types
         if isinstance(obj, float):
             if math.isnan(obj) or math.isinf(obj):
-                return str(obj)  # Convert NaN/Inf to string
+                return None  # Convert NaN/Inf to None (JSON-compatible)
             return obj
-        elif isinstance(obj, dict):
-            return {k: convert_to_json_serializable(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [convert_to_json_serializable(item) for item in obj]
         elif isinstance(obj, (str, int, bool, type(None))):
             return obj
-        elif hasattr(obj, "__dict__"):
-            # Convert objects with __dict__ to dict
-            return convert_to_json_serializable(obj.__dict__)
+        elif isinstance(obj, dict):
+            # Convert dict items recursively, avoiding circular references
+            result = {}
+            for k, v in obj.items():
+                # Skip private/internal attributes
+                if isinstance(k, str) and k.startswith("_"):
+                    continue
+                try:
+                    result[k] = convert_to_json_serializable(v, depth + 1, max_depth)
+                except (RecursionError, TypeError):
+                    result[k] = str(v)
+            return result
+        elif isinstance(obj, (list, tuple)):
+            return [
+                convert_to_json_serializable(item, depth + 1, max_depth) for item in obj
+            ]
         else:
-            # Fallback: convert to string for unknown types
+            # For other objects, try to convert to string
             return str(obj)
 
     return {
