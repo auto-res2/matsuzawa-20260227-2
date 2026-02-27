@@ -1,0 +1,11 @@
+{
+  "abstain_rate": 0.7,
+  "accuracy_all": 0.205,
+  "accuracy_answered": 0.6833333333333333,
+  "avg_broken_count": 1.6312849162011174,
+  "avg_risk_score": 0.3810614525139659,
+  "num_abstained": 140,
+  "num_answered": 60,
+  "total_correct": 41,
+  "total_samples": 200
+}

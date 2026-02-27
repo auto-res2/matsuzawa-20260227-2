@@ -1,0 +1,9 @@
+{
+  "abstain_rate": 0,
+  "accuracy_all": 0.87,
+  "accuracy_answered": 0.87,
+  "num_abstained": 0,
+  "num_answered": 200,
+  "total_correct": 174,
+  "total_samples": 200
+}

@@ -1,0 +1,37 @@
+=== [VISUALIZATION] Start at Fri Feb 27 21:50:58 UTC 2026 ===
+
+================================================================================
+Evaluation Script
+Results dir: .research/results
+Run IDs: ['baseline-cot', 'proposed-ebc3ot']
+================================================================================
+Fetching run from WandB: baseline-cot
+Fetching run from WandB: proposed-ebc3ot
+Exported metrics: .research/results/baseline-cot/metrics.json
+Created figure: .research/results/baseline-cot/baseline-cot_metrics.pdf
+Exported metrics: .research/results/proposed-ebc3ot/metrics.json
+Created figure: .research/results/proposed-ebc3ot/proposed-ebc3ot_metrics.pdf
+Exported aggregated metrics: .research/results/comparison/aggregated_metrics.json
+Created comparison figure: .research/results/comparison/comparison_accuracy_all.pdf
+Created comparison figure: .research/results/comparison/comparison_accuracy_answered.pdf
+Created comparison figure: .research/results/comparison/comparison_abstain_rate.pdf
+Created summary table: .research/results/comparison/comparison_summary_table.pdf
+
+================================================================================
+EVALUATION COMPLETE
+================================================================================
+
+Generated files in: .research/results
+- Per-run metrics: .research/results/<run_id>/metrics.json
+- Per-run figures: .research/results/<run_id>/*.pdf
+- Aggregated metrics: .research/results/comparison/aggregated_metrics.json
+- Comparison figures: .research/results/comparison/*.pdf
+
+================================================================================
+SUMMARY
+================================================================================
+Primary metric: accuracy_answered
+Best proposed: proposed-ebc3ot = 0.683
+Best baseline: baseline-cot = 0.870
+Gap: -0.187
+=== [VISUALIZATION] PASSED at Fri Feb 27 21:51:07 UTC 2026 ===
