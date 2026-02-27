@@ -245,18 +245,43 @@ def main(cfg: DictConfig):
         )
         print(f"\nWandB run: {wandb.run.url}")
 
+    # [VALIDATOR FIX - Attempt 1]
+    # [PROBLEM]: vLLM initialization failed with FileNotFoundError: [Errno 2] No such file or directory: ''
+    # [CAUSE]: cfg.cache_dir is a relative path (".cache"), but vLLM's download_dir needs an absolute path.
+    #          When Hydra changes working directory, relative paths can resolve incorrectly or to empty strings.
+    # [FIX]: Convert cache_dir to absolute path before passing to vLLM and dataset loader.
+    #
+    # [OLD CODE]:
+    # samples = load_gsm8k(
+    #     split=cfg.dataset.split,
+    #     max_samples=cfg.dataset.max_samples,
+    #     cache_dir=cfg.cache_dir,
+    # )
+    # llm = LLM(
+    #     model=cfg.model.name,
+    #     download_dir=cfg.cache_dir,
+    #     tensor_parallel_size=1,
+    # )
+    #
+    # [NEW CODE]:
+    # Resolve cache_dir to absolute path
+    cache_dir_abs = Path(cfg.cache_dir).resolve()
+    cache_dir_abs.mkdir(parents=True, exist_ok=True)
+    cache_dir_str = str(cache_dir_abs)
+    print(f"\nCache directory: {cache_dir_str}")
+
     # Load dataset
     samples = load_gsm8k(
         split=cfg.dataset.split,
         max_samples=cfg.dataset.max_samples,
-        cache_dir=cfg.cache_dir,
+        cache_dir=cache_dir_str,
     )
 
     # Initialize model
     print(f"\nLoading model: {cfg.model.name}")
     llm = LLM(
         model=cfg.model.name,
-        download_dir=cfg.cache_dir,
+        download_dir=cache_dir_str,
         tensor_parallel_size=1,
     )
 
