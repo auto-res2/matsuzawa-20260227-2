@@ -1,0 +1,64 @@
+# Proposed: Evidence-Budgeted Commit-Check Chain-of-Thought (two calls)
+run_id: proposed-ebc3ot
+
+method:
+  type: proposed
+  name: eb_c3ot
+  description: "Evidence-Budgeted Commit-Check CoT with explicit decision rule"
+  num_calls: 2
+  revision_budget: 1  # Maximum number of steps that can be BROKEN
+  risk_threshold: 0.5  # Maximum evidence-weighted risk score
+
+inference:
+  # Commit pass: Generate structured claims with confidence and evidence
+  commit_prompt_template: |
+    You are a careful math problem solver. For the following question, create a step-by-step solution where EACH step is a checkable claim with evidence.
+    
+    Question: {question}
+    
+    Format each step as:
+    Step N: [TYPE] <claim statement>
+    Confidence: <0.55 or 0.70 or 0.85>
+    Evidence: <minimal evidence handle: equation, fact, or quoted text>
+    
+    TYPE must be one of:
+    - ARITH: arithmetic calculation (provide equation)
+    - FACT: factual statement (provide entity-relation)
+    - CHOICE: elimination or selection (provide rule)
+    
+    Use 3-6 steps maximum. Be precise and provide verifiable evidence for each step.
+    
+    After all steps, provide:
+    Final Answer: <numeric value only>
+  
+  # Check pass: Verify each claim and apply decision rule
+  check_prompt_template: |
+    You are a strict verifier. Review each step from the following solution and mark it as SUPPORTED or BROKEN.
+    
+    Original Question: {question}
+    
+    Solution to verify:
+    {commit_response}
+    
+    For each step:
+    1. Check if the evidence supports the claim
+    2. Verify arithmetic, facts, or logic
+    3. Mark as SUPPORTED or BROKEN with a one-line reason
+    
+    Then compute:
+    - Total BROKEN steps count
+    - Risk score = sum of (1 - confidence) for BROKEN steps only
+    
+    Decision rule:
+    - If BROKEN steps > {revision_budget}, output: ABSTAIN
+    - If risk score > {risk_threshold}, output: ABSTAIN
+    - Otherwise, output: FINAL ANSWER <numeric value>
+    
+    Format your response as:
+    Step 1: SUPPORTED/BROKEN - reason
+    Step 2: SUPPORTED/BROKEN - reason
+    ...
+    
+    BROKEN_COUNT: <number>
+    RISK_SCORE: <value>
+    DECISION: FINAL ANSWER <value> or ABSTAIN

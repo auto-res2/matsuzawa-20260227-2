@@ -1,0 +1,16 @@
+# Baseline: Standard Chain-of-Thought prompting (single call)
+run_id: baseline-cot
+
+method:
+  type: baseline
+  name: standard_cot
+  description: "Standard Chain-of-Thought prompting with one call per question"
+  num_calls: 1
+
+inference:
+  prompt_template: |
+    You are a math problem-solving assistant. Answer the following question step-by-step, showing your reasoning.
+    
+    Question: {question}
+    
+    Please solve this problem step-by-step and provide the final numerical answer.

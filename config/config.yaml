@@ -1,5 +1,5 @@
 # Main configuration for Hydra
-# This file will be populated by AI code generator based on experimental design
+# This file provides shared defaults for all runs
 
 defaults:
   - _self_
@@ -11,8 +11,23 @@ mode: main
 # Results output directory
 results_dir: .research/results
 
-# WandB configuration (will be set by AI agent)
+# Cache directory for models and datasets
+cache_dir: .cache
+
+# WandB configuration
 wandb:
-  entity: ???
-  project: ???
+  entity: airas
+  project: 2026-0227-matsuzawa-2
   mode: online
+
+# Model configuration
+model:
+  name: meta-llama/Llama-3.1-8B-Instruct
+  temperature: 0.0
+  max_tokens: 2048
+
+# Dataset configuration
+dataset:
+  name: gsm8k
+  split: test
+  max_samples: 200
