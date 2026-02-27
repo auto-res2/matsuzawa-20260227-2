@@ -1143,5 +1143,67 @@
       "config/run/proposed-ebc3ot.yaml": "# Proposed: Evidence-Budgeted Commit-Check Chain-of-Thought (two calls)\nrun_id: proposed-ebc3ot\n\nmethod:\n  type: proposed\n  name: eb_c3ot\n  description: \"Evidence-Budgeted Commit-Check CoT with explicit decision rule\"\n  num_calls: 2\n  revision_budget: 1  # Maximum number of steps that can be BROKEN\n  risk_threshold: 0.5  # Maximum evidence-weighted risk score\n\ninference:\n  # Commit pass: Generate structured claims with confidence and evidence\n  commit_prompt_template: |\n    You are a careful math problem solver. For the following question, create a step-by-step solution where EACH step is a checkable claim with evidence.\n    \n    Question: {question}\n    \n    Format each step as:\n    Step N: [TYPE] <claim statement>\n    Confidence: <0.55 or 0.70 or 0.85>\n    Evidence: <minimal evidence handle: equation, fact, or quoted text>\n    \n    TYPE must be one of:\n    - ARITH: arithmetic calculation (provide equation)\n    - FACT: factual statement (provide entity-relation)\n    - CHOICE: elimination or selection (provide rule)\n    \n    Use 3-6 steps maximum. Be precise and provide verifiable evidence for each step.\n    \n    After all steps, provide:\n    Final Answer: <numeric value only>\n  \n  # Check pass: Verify each claim and apply decision rule\n  check_prompt_template: |\n    You are a strict verifier. Review each step from the following solution and mark it as SUPPORTED or BROKEN.\n    \n    Original Question: {question}\n    \n    Solution to verify:\n    {commit_response}\n    \n    For each step:\n    1. Check if the evidence supports the claim\n    2. Verify arithmetic, facts, or logic\n    3. Mark as SUPPORTED or BROKEN with a one-line reason\n    \n    Then compute:\n    - Total BROKEN steps count\n    - Risk score = sum of (1 - confidence) for BROKEN steps only\n    \n    Decision rule:\n    - If BROKEN steps > {revision_budget}, output: ABSTAIN\n    - If risk score > {risk_threshold}, output: ABSTAIN\n    - Otherwise, output: FINAL ANSWER <numeric value>\n    \n    Format your response as:\n    Step 1: SUPPORTED/BROKEN - reason\n    Step 2: SUPPORTED/BROKEN - reason\n    ...\n    \n    BROKEN_COUNT: <number>\n    RISK_SCORE: <value>\n    DECISION: FINAL ANSWER <value> or ABSTAIN\n",
       "pyproject.toml": "[project]\nname = \"airas-experiment\"\nversion = \"0.1.0\"\ndescription = \"AI Research Experiment Framework\"\nrequires-python = \">=3.11\"\ndependencies = [\n    \"hydra-core>=1.3.2\",\n    \"wandb>=0.16.0\",\n    \"datasets>=2.16.0\",\n    \"torch>=2.1.0\",\n    \"transformers>=4.36.0\",\n    \"vllm>=0.5.0\",\n    \"matplotlib>=3.8.0\",\n    \"seaborn>=0.13.0\",\n    \"pandas>=2.1.0\",\n    \"numpy>=1.26.0\",\n    \"omegaconf>=2.3.0\",\n    \"pydantic>=2.5.0\",\n]\n\n[build-system]\nrequires = [\"setuptools>=68.0\"]\nbuild-backend = \"setuptools.build_meta\"\n"
     }
+  },
+  "experimental_results": {
+    "figures": [
+      "baseline-cot_metrics.pdf",
+      "proposed-ebc3ot_metrics.pdf",
+      "comparison_abstain_rate.pdf",
+      "comparison_accuracy_all.pdf",
+      "comparison_accuracy_answered.pdf",
+      "comparison_summary_table.pdf",
+      ".research/diagrams/methodology_comparison_baseline_vs_ebc3ot.pdf",
+      ".research/diagrams/system_architecture_airas_pipeline.pdf"
+    ],
+    "metrics_data": {
+      "baseline-cot": {
+        "abstain_rate": 0,
+        "accuracy_all": 0.87,
+        "accuracy_answered": 0.87,
+        "num_abstained": 0,
+        "num_answered": 200,
+        "total_correct": 174,
+        "total_samples": 200
+      },
+      "proposed-ebc3ot": {
+        "abstain_rate": 0.7,
+        "accuracy_all": 0.205,
+        "accuracy_answered": 0.6833333333333333,
+        "avg_broken_count": 1.6312849162011174,
+        "avg_risk_score": 0.3810614525139659,
+        "num_abstained": 140,
+        "num_answered": 60,
+        "total_correct": 41,
+        "total_samples": 200
+      },
+      "comparison": {
+        "primary_metric": "accuracy_answered",
+        "metrics_by_run": {
+          "baseline-cot": {
+            "abstain_rate": 0,
+            "accuracy_all": 0.87,
+            "accuracy_answered": 0.87,
+            "num_abstained": 0,
+            "num_answered": 200,
+            "total_correct": 174,
+            "total_samples": 200
+          },
+          "proposed-ebc3ot": {
+            "abstain_rate": 0.7,
+            "accuracy_all": 0.205,
+            "accuracy_answered": 0.6833333333333333,
+            "avg_broken_count": 1.6312849162011174,
+            "avg_risk_score": 0.3810614525139659,
+            "num_abstained": 140,
+            "num_answered": 60,
+            "total_correct": 41,
+            "total_samples": 200
+          }
+        },
+        "best_proposed": "proposed-ebc3ot",
+        "best_baseline": "baseline-cot",
+        "gap": -0.18666666666666665
+      }
+    }
   }
 }
