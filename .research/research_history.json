@@ -1023,5 +1023,111 @@
     "experimental_code": "import re\nfrom dataclasses import dataclass\nfrom typing import Callable, Dict, List, Optional, Tuple\n\n# Provide your own LLM call.\ndef llm(prompt: str) -> str:\n    raise NotImplementedError\n\n@dataclass\nclass Example:\n    q: str\n    y: str\n\n# ---------------- Parsing helpers ----------------\n\ndef extract_final(text: str) -> str:\n    m = re.search(r\"FINAL\\s*ANSWER\\s*[:\\-]\\s*(.*)\", text, re.IGNORECASE)\n    if m:\n        return m.group(1).strip()\n    return text.strip().splitlines()[-1].strip()\n\n\ndef norm_gsm8k(ans: str) -> str:\n    nums = re.findall(r\"[-+]?\\d*\\.?\\d+\", ans.replace(\",\", \"\"))\n    return nums[-1] if nums else ans.strip()\n\n\ndef norm_strategyqa(ans: str) -> str:\n    a = ans.strip().lower()\n    if \"yes\" in a and \"no\" not in a:\n        return \"yes\"\n    if \"no\" in a and \"yes\" not in a:\n        return \"no\"\n    return a.split()[0] if a else a\n\n# ---------------- Prompts ----------------\n\ndef prompt_cot(q: str) -> str:\n    return f\"Q: {q}\\nA: Let's think step by step.\"\n\n\ndef prompt_commit(q: str) -> str:\n    return (\n        \"You will solve the problem by writing a short PLAN as checkable CLAIMS.\\n\"\n        \"Write 3-6 numbered steps. Each step MUST be one of:\\n\"\n        \"- ARITH: <equation or transformation>\\n\"\n        \"- FACT: <atomic factual relation>\\n\"\n        \"- RULE: <decision/elimination rule>\\n\"\n        \"For EACH step include: confidence p in {0.55,0.70,0.85} and EVIDENCE (a short equation or quoted phrase from the question).\\n\"\n        \"Format строго:\\n\"\n        \"CLAIMS:\\n\"\n        \"1) <TYPE>: <claim> | p=<p> | ev=<evidence>\\n\"\n        \"...\\n\"\n        \"Do NOT give the final answer.\\n\\n\"\n        f\"PROBLEM: {q}\\n\"\n    )\n\n\ndef prompt_check(q: str, claims: str, budget_b: int) -> str:\n    return (\n        \"You are a verifier. For each claim, decide if it is SUPPORTED or BROKEN given the problem.\\n\"\n        \"If BROKEN, give a one-line correction.\\n\"\n        f\"You have a REVISION BUDGET B={budget_b}: at most B claims may be corrected.\\n\"\n        \"If more than B claims are BROKEN, you MUST output ABSTAIN.\\n\"\n        \"Finally, if not abstaining, output ONLY:\\n\"\n        \"FINAL ANSWER: <answer>\\n\\n\"\n        f\"PROBLEM: {q}\\n\\n{claims}\\n\"\n    )\n\n# ---------------- EB-C3oT runner ----------------\n\ndef parse_claim_lines(claims: str) -> List[Tuple[float, str]]:\n    out = []\n    for line in claims.splitlines():\n        m = re.search(r\"\\|\\s*p\\s*=\\s*(0\\.55|0\\.70|0\\.85)\", line)\n        if m:\n            out.append((float(m.group(1)), line))\n    return out\n\n\ndef compute_risk(claims: str, check: str) -> float:\n    # risk = sum_i (1-p_i) * 1[BROKEN_i]\n    ps = parse_claim_lines(claims)\n    broken_lines = set()\n    for line in check.splitlines():\n        if re.search(r\"\\bBROKEN\\b\", line, re.IGNORECASE):\n            broken_lines.add(line)\n    # Approx: count BROKEN occurrences (we don't align steps perfectly to stay lightweight)\n    broken_count = len(re.findall(r\"\\bBROKEN\\b\", check, re.IGNORECASE))\n    # Use lowest p's first as conservative if alignment missing\n    ps_sorted = sorted([p for p, _ in ps])\n    return sum((1 - p) for p in ps_sorted[:broken_count])\n\n\ndef run_method(ex: Example, method: str, normalizer: Callable[[str], str], *, budget_b: int = 1) -> Dict:\n    if method == \"direct\":\n        out = llm(f\"Q: {ex.q}\\nA: \")\n        pred = normalizer(extract_final(out))\n        return {\"pred\": pred, \"raw\": out, \"abstain\": False}\n\n    if method == \"cot\":\n        out = llm(prompt_cot(ex.q))\n        pred = normalizer(extract_final(out))\n        return {\"pred\": pred, \"raw\": out, \"abstain\": False}\n\n    if method == \"eb_c3ot\":\n        claims = llm(prompt_commit(ex.q))\n        check = llm(prompt_check(ex.q, claims, budget_b))\n        abstain = bool(re.search(r\"\\bABSTAIN\\b\", check, re.IGNORECASE))\n        if abstain:\n            return {\"pred\": None, \"raw\": check, \"claims\": claims, \"abstain\": True, \"risk\": compute_risk(claims, check)}\n        pred = normalizer(extract_final(check))\n        return {\"pred\": pred, \"raw\": check, \"claims\": claims, \"abstain\": False, \"risk\": compute_risk(claims, check)}\n\n    raise ValueError(method)\n\n\ndef accuracy_answered(examples: List[Example], outputs: List[Dict]) -> float:\n    answered = [(e, o) for e, o in zip(examples, outputs) if not o.get(\"abstain\", False) and o.get(\"pred\") is not None]\n    if not answered:\n        return 0.0\n    return sum(o[\"pred\"] == e.y for e, o in answered) / len(answered)\n\n\ndef answer_rate(outputs: List[Dict]) -> float:\n    return sum((not o.get(\"abstain\", False)) and (o.get(\"pred\") is not None) for o in outputs) / len(outputs)\n",
     "expected_result": "EB-C3oT should improve *answered-item* accuracy while abstaining on a minority of high-risk questions.\n\nPredictions (temperature=0, 200 items each):\n- GSM8K:\n  - Standard CoT accuracy (all items): ~0.55.\n  - EB-C3oT (B=1): answer_rate ~0.88; accuracy_on_answered ~0.64.\n  - EB-C3oT (B=0): answer_rate ~0.75; accuracy_on_answered ~0.68.\n- StrategyQA:\n  - Standard CoT accuracy (all items): ~0.66.\n  - EB-C3oT (B=1): answer_rate ~0.92; accuracy_on_answered ~0.72.\n\nSecondary expectations:\n- Risk score correlates with errors (Spearman ρ ~0.3–0.5).\n- Among items wrong under standard CoT, EB-C3oT abstains on ~25–40% (safety gain).\n\nHigher accuracy is better; higher answer_rate is better but trades off with accuracy via budget/threshold.",
     "expected_conclusion": "By adding an evidence-budgeted verification constraint and an explicit abstention/accept rule, EB-C3oT turns self-audit from a stylistic prompt into a deterministic certification procedure with a controllable compute–reliability trade-off. Academically, it contributes a prompt-only, decision-theoretic framing (budget + risk) that can be systematically evaluated under greedy decoding, and yields interpretable diagnostics (risk, broken-claim count) that predict failures. Socially, selective answering reduces confidently wrong outputs in high-stakes or educational settings without costly self-consistency sampling or finetuning, enabling safer deployment with transparent coverage control."
+  },
+  "experimental_design": {
+    "experiment_summary": "Goal: evaluate a prompt-only, deterministic reliability protocol for LLM question answering where the model must either (a) answer correctly with verifiable intermediate claims or (b) abstain when self-verification fails. Task nature: given a natural-language question, the model produces a final answer (numeric for GSM8K) and, for EB-C3oT, additionally produces structured step claims with coarse confidences and minimal evidence handles that a second deterministic verifier call checks.\n\nWorkflow (all greedy/temperature=0; no extra sampling):\n1) Baseline prompting produces an answer in one call.\n2) Proposed EB-C3oT uses exactly two calls per item: (i) Commit pass outputs 3–6 checkable claims with p∈{0.55,0.70,0.85} and evidence handles; (ii) Check pass attempts to falsify each claim, applies a hard revision budget B (0 or 1), computes BROKEN count and an evidence-weighted risk score risk=Σ(1−p_i)·1[BROKEN_i], and either returns FINAL ANSWER or ABSTAIN based on the explicit decision rule.\n\nPurpose: demonstrate that adding an explicit decision rule (budget + risk threshold) reduces confidently wrong answers and enables selective answering without sampling, by increasing accuracy on answered items and abstaining on high-risk failures.\n\nScale fit to Runner: Use a single model and a single dataset split truncated to 200 examples (first 200 of GSM8K test). Each method is deterministic and lightweight; the most expensive condition (EB-C3oT) is 2 calls/example → 400 calls for 200 items; plus baseline 200 calls. Total ~600 model calls—well within a single H200 runner budget. No training/fine-tuning; only inference.",
+    "runner_config": {
+      "runner_label": [
+        "self-hosted",
+        "gpu-runner"
+      ],
+      "description": "NVIDIA H200, VRAM: 140 GB, RAM: 240 GB"
+    },
+    "evaluation_metrics": [
+      {
+        "name": "accuracy",
+        "description": "Correctness criteria: For GSM8K, a prediction is correct if the final numeric value matches the ground-truth answer after normalization (strip commas, extract the last number in the model output) and exact string match on the normalized numeric token (optionally allow a small tolerance, e.g., |pred−gold|≤1e−6 when both parse as floats).\n\nCalculation method: Two variants are reported, but the metric name `accuracy` refers to answered-item accuracy (deployment-relevant correctness when the system commits):\n- Let N be total items, A be the set of answered (non-abstained) items, and I[·] be an indicator. Then\n  accuracy = (1/|A|) * Σ_{i∈A} I[ norm(pred_i) == norm(gold_i) ].\nIf |A|=0, define accuracy=0.\n\nTask appropriateness: GSM8K has a single numeric target per question; answered-item accuracy captures whether the protocol improves correctness when it decides to provide an answer, which directly tests the hypothesis about reducing wrong-but-confident outputs.\n\nRelevant visualizations: (i) Bar chart with 95% bootstrap CIs for accuracy by method; (ii) paired-difference bootstrap distribution plot (EB-C3oT − baseline) for accuracy on answered items."
+      },
+      {
+        "name": "answer_rate",
+        "description": "Correctness criteria: An item is considered answered if the system outputs a non-empty final answer and does not output the token `ABSTAIN` (case-insensitive).\n\nCalculation method: answer_rate = (1/N) * Σ_{i=1..N} I[ not abstain_i ].\n\nTask appropriateness: EB-C3oT introduces selective abstention; coverage (how often the system answers) must be measured alongside accuracy to characterize the trade-off for deployment.\n\nRelevant visualizations: Coverage vs method bar chart; coverage–accuracy trade-off curve (accuracy_on_answered vs answer_rate) with points for B=0 and B=1."
+      },
+      {
+        "name": "selective_risk_auc",
+        "description": "Correctness criteria: Uses EB-C3oT’s scalar risk score per example. Lower risk should correspond to higher correctness.\n\nCalculation method: For EB-C3oT, sweep a risk threshold τ over the set of observed risk values. For each τ, define answered set A(τ) = {i: risk_i ≤ τ and not abstain_i_by_budget}. Compute accuracy(τ) on A(τ) and coverage(τ)=|A(τ)|/N. Plot accuracy vs coverage; compute AUC by trapezoidal integration over coverage in [0,1] (or over the achieved coverage range).\n\nTask appropriateness: The hypothesis claims EB-C3oT yields a measurable step-level reliability signal that supports selective answering. AUC summarizes the quality of the risk score as a ranking function for correctness.\n\nRelevant visualizations: Accuracy–coverage curve with AUC annotation; optionally overlay baseline as a horizontal line at its full-coverage accuracy."
+      },
+      {
+        "name": "wrong_answer_abstention_rate",
+        "description": "Correctness criteria: A wrong answer is any answered prediction that is incorrect under the GSM8K numeric matching rule. For this metric, focus on whether EB-C3oT abstains instead of emitting an incorrect answer.\n\nCalculation method: Let W_base be the set of items that the baseline method (e.g., standard CoT) answers incorrectly. For EB-C3oT, compute\nwrong_answer_abstention_rate = (1/|W_base|) * Σ_{i∈W_base} I[ EB-C3oT abstains on i ].\nAlso report the unconditional wrong-output rate: wrong_rate = 1 − accuracy * answer_rate (with accuracy defined on answered items).\n\nTask appropriateness: Directly measures the safety gain: how often the protocol avoids confidently wrong outputs that a typical prompt-only baseline would produce.\n\nRelevant visualizations: Stacked bar chart showing, for items wrong under baseline, the EB-C3oT outcomes (correct / wrong / abstain)."
+      },
+      {
+        "name": "risk_error_spearman",
+        "description": "Correctness criteria: Risk score should increase when the model is wrong.\n\nCalculation method: For EB-C3oT answered items, compute an error indicator e_i = 1 if incorrect else 0. Compute Spearman’s rank correlation ρ between risk_i and e_i (ties handled with average ranks). Optionally include abstained items by treating them separately; primary report is on answered items to reflect ‘risk of being wrong when you answer’.\n\nTask appropriateness: Tests whether the risk score is a meaningful reliability signal, enabling thresholding/escalation.\n\nRelevant visualizations: Scatter/strip plot of risk by correctness (correct vs incorrect) plus violin/box plots; calibration-style plot of empirical error rate binned by risk quantiles."
+      }
+    ],
+    "models_to_use": [
+      "gemini-2.5-pro (~unknown params)"
+    ],
+    "datasets_to_use": [
+      "GSM8K"
+    ],
+    "proposed_method": {
+      "method_name": "EB-C3oT (Evidence-Budgeted Commit–Check CoT)",
+      "description": "Inference-only, deterministic two-call prompting protocol. Call 1 (Commit): produce 3–6 numbered, checkable claims with constrained schemas (ARITH/FACT/RULE), coarse confidence p∈{0.55,0.70,0.85}, and a minimal evidence handle. Call 2 (Check): reprompt the same model as a verifier that labels each claim SUPPORTED/BROKEN, is constrained by a hard revision budget B (0 or 1), and applies an explicit decision rule: return FINAL ANSWER only if (#BROKEN ≤ B) and evidence-weighted risk Σ(1−p_i)·1[BROKEN_i] ≤ τ; otherwise output ABSTAIN. Novelty is the explicit optimization-like constraint (budget) plus deterministic accept/reject rule producing an interpretable risk score without sampling.",
+      "optuna_config": {
+        "enabled": true,
+        "n_trials": 20,
+        "search_spaces": [
+          {
+            "param_name": "budget_b",
+            "distribution_type": "categorical",
+            "choices": [
+              0,
+              1
+            ]
+          },
+          {
+            "param_name": "risk_threshold_tau",
+            "distribution_type": "uniform",
+            "low": 0.0,
+            "high": 1.5
+          },
+          {
+            "param_name": "max_claims",
+            "distribution_type": "int",
+            "low": 3.0,
+            "high": 8.0
+          },
+          {
+            "param_name": "commit_max_tokens",
+            "distribution_type": "int",
+            "low": 256.0,
+            "high": 768.0
+          },
+          {
+            "param_name": "check_max_tokens",
+            "distribution_type": "int",
+            "low": 128.0,
+            "high": 512.0
+          }
+        ]
+      }
+    },
+    "comparative_methods": [
+      {
+        "method_name": "Standard CoT (single-pass)",
+        "description": "Single-call prompt: ‘Let’s think step by step’ followed by a final answer. Deterministic decoding (temperature=0). No explicit verification, abstention, or decision rule; serves as the strongest common prompt-only baseline for reasoning.",
+        "optuna_config": {
+          "enabled": true,
+          "n_trials": 20,
+          "search_spaces": [
+            {
+              "param_name": "cot_max_tokens",
+              "distribution_type": "int",
+              "low": 256.0,
+              "high": 1024.0
+            },
+            {
+              "param_name": "cot_prompt_style",
+              "distribution_type": "categorical",
+              "choices": [
+                "Let's think step by step.",
+                "Let's work this out carefully step by step. Provide final answer at end."
+              ]
+            }
+          ]
+        }
+      }
+    ]
   }
 }
