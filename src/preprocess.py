@@ -89,15 +89,61 @@ def normalize_answer(answer: str) -> float:
     Returns:
         Normalized numeric value
     """
-    # Remove common text patterns
-    answer = answer.lower()
-    answer = re.sub(r"(the answer is|final answer|answer:)", "", answer)
-    answer = answer.strip()
+    # [VALIDATOR FIX - Attempt 1]
+    # [PROBLEM]: All predictions were 1.0 even though model responses contained correct answers like 18, 3, 70000, etc.
+    # [CAUSE]: The regex was extracting the first number in the text, which was often "1" from "Step 1:" in the reasoning.
+    #          The model outputs answers in LaTeX format like "$\boxed{18}$" or "The final answer is: $\boxed{18}$"
+    #          but the function was not prioritizing these answer markers.
+    # [FIX]: First try to extract from common answer patterns (boxed, "final answer is", etc.),
+    #        then fall back to finding the last number in the text (more likely to be the answer than the first).
+    #
+    # [OLD CODE]:
+    # # Remove common text patterns
+    # answer = answer.lower()
+    # answer = re.sub(r"(the answer is|final answer|answer:)", "", answer)
+    # answer = answer.strip()
+    #
+    # # Extract first number found
+    # numbers = re.findall(r"[-+]?[\d,]+\.?\d*", answer)
+    # if numbers:
+    #     return float(numbers[0].replace(",", ""))
+    #
+    # [NEW CODE]:
 
-    # Extract first number found
+    # Strategy 1: Try to extract from \boxed{} LaTeX format (most reliable)
+    boxed_match = re.search(r"\\boxed\{([-+]?[\d,]+\.?\d*)\}", answer)
+    if boxed_match:
+        return float(boxed_match.group(1).replace(",", ""))
+
+    # Strategy 2: Look for "final answer is" or similar patterns
+    final_answer_patterns = [
+        r"final answer is[:\s]*\$?\\?boxed\{?([-+]?[\d,]+\.?\d*)\}?",
+        r"the answer is[:\s]*\$?\\?boxed\{?([-+]?[\d,]+\.?\d*)\}?",
+        r"answer[:\s]+([-+]?[\d,]+\.?\d*)\s*$",
+    ]
+
+    answer_lower = answer.lower()
+    for pattern in final_answer_patterns:
+        match = re.search(pattern, answer_lower)
+        if match:
+            return float(match.group(1).replace(",", ""))
+
+    # Strategy 3: Extract all numbers and return the LAST one (most likely the final answer)
     numbers = re.findall(r"[-+]?[\d,]+\.?\d*", answer)
     if numbers:
-        return float(numbers[0].replace(",", ""))
+        # Filter out numbers that are likely step numbers (single digits 1-9 followed by colon or period)
+        # and prefer larger numbers
+        filtered = []
+        for num_str in numbers:
+            num_val = float(num_str.replace(",", ""))
+            # Skip obvious step numbers (single digit followed by nothing substantial)
+            if num_val >= 10 or len(numbers) == 1:
+                filtered.append(num_str)
+
+        if filtered:
+            return float(filtered[-1].replace(",", ""))
+        # If all filtered out, just use the last number
+        return float(numbers[-1].replace(",", ""))
 
     # If no number found, raise error
     raise ValueError(f"Could not extract numeric value from: {answer}")
