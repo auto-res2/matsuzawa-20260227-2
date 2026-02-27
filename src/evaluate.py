@@ -14,21 +14,65 @@ import numpy as np
 
 def parse_args():
     """Parse command line arguments."""
+    # [VALIDATOR FIX - Attempt 1]
+    # [PROBLEM]: Script expects standard argparse format but workflow uses Hydra-style key=value
+    # [CAUSE]: Workflow calls with results_dir="..." run_ids="..." but argparse expects positional args
+    # [FIX]: Parse Hydra-style key=value arguments manually before using argparse
+    #
+    # [OLD CODE]:
+    # parser = argparse.ArgumentParser(description="Evaluate and compare experiment runs")
+    # parser.add_argument("results_dir", type=str, help="Results directory path")
+    # parser.add_argument("run_ids", type=str, help="JSON string list of run IDs to compare")
+    # ...
+    # return parser.parse_args()
+    #
+    # [NEW CODE]:
+    import sys
+
+    # Check if arguments are in Hydra-style format (key=value)
+    hydra_args = {}
+    remaining_args = []
+    for arg in sys.argv[1:]:
+        if "=" in arg and not arg.startswith("-"):
+            key, value = arg.split("=", 1)
+            hydra_args[key] = value
+        else:
+            remaining_args.append(arg)
+
     parser = argparse.ArgumentParser(description="Evaluate and compare experiment runs")
-    parser.add_argument("results_dir", type=str, help="Results directory path")
-    parser.add_argument(
-        "run_ids", type=str, help="JSON string list of run IDs to compare"
-    )
-    parser.add_argument(
-        "--wandb-entity", type=str, default="airas", help="WandB entity"
-    )
-    parser.add_argument(
-        "--wandb-project",
-        type=str,
-        default="2026-0227-matsuzawa-2",
-        help="WandB project",
-    )
-    return parser.parse_args()
+
+    if hydra_args:
+        # Hydra-style arguments detected, use them directly
+        parser.add_argument(
+            "--wandb-entity", type=str, default="airas", help="WandB entity"
+        )
+        parser.add_argument(
+            "--wandb-project",
+            type=str,
+            default="2026-0227-matsuzawa-2",
+            help="WandB project",
+        )
+        args = parser.parse_args(remaining_args)
+        # Add Hydra-style args to namespace
+        args.results_dir = hydra_args.get("results_dir", ".research/results")
+        args.run_ids = hydra_args.get("run_ids", "")
+        return args
+    else:
+        # Standard argparse format
+        parser.add_argument("results_dir", type=str, help="Results directory path")
+        parser.add_argument(
+            "run_ids", type=str, help="JSON string list of run IDs to compare"
+        )
+        parser.add_argument(
+            "--wandb-entity", type=str, default="airas", help="WandB entity"
+        )
+        parser.add_argument(
+            "--wandb-project",
+            type=str,
+            default="2026-0227-matsuzawa-2",
+            help="WandB project",
+        )
+        return parser.parse_args()
 
 
 def fetch_run_from_wandb(entity: str, project: str, run_id: str) -> Dict[str, Any]:
@@ -323,7 +367,40 @@ def main():
     args = parse_args()
 
     results_dir = Path(args.results_dir)
-    run_ids = json.loads(args.run_ids)
+
+    # [VALIDATOR FIX - Attempt 1]
+    # [PROBLEM]: json.loads fails when args.run_ids is an empty string or invalid JSON
+    # [CAUSE]: The workflow may pass an empty string when run_ids input is not provided
+    # [FIX]: Add error handling and auto-discover run directories when run_ids is empty/invalid
+    #
+    # [OLD CODE]:
+    # run_ids = json.loads(args.run_ids)
+    #
+    # [NEW CODE]:
+    try:
+        if not args.run_ids or args.run_ids.strip() == "":
+            # Auto-discover run directories in results_dir
+            print("[INFO] No run_ids provided. Auto-discovering run directories...")
+            run_dirs = [
+                d.name
+                for d in results_dir.iterdir()
+                if d.is_dir() and not d.name.startswith(".")
+            ]
+            run_ids = sorted(run_dirs)
+            if not run_ids:
+                print(f"[ERROR] No run directories found in {results_dir}")
+                print("[INFO] Available files:")
+                for item in results_dir.iterdir():
+                    print(f"  - {item.name} ({'dir' if item.is_dir() else 'file'})")
+                raise ValueError(f"No run directories found in {results_dir}")
+        else:
+            run_ids = json.loads(args.run_ids)
+    except json.JSONDecodeError as e:
+        print(f"[ERROR] Failed to parse run_ids as JSON: {e}")
+        print(f"[ERROR] Received: {repr(args.run_ids)}")
+        raise ValueError(
+            f'run_ids must be a valid JSON array (e.g., \'["run-1", "run-2"]\'), got: {repr(args.run_ids)}'
+        )
 
     print("\n" + "=" * 80)
     print(f"Evaluation Script")
@@ -357,7 +434,17 @@ def main():
                 continue
 
     if not runs_data:
-        print("[ERROR] No run data available")
+        print("\n" + "=" * 80)
+        print("[ERROR] No run data available for visualization")
+        print("=" * 80)
+        print("\nPossible reasons:")
+        print("1. No run_ids were provided and no run directories were found")
+        print("2. All specified runs failed to load from WandB and local files")
+        print(f"3. The results directory may be empty: {results_dir}")
+        print("\nTo fix:")
+        print("- Ensure you have completed main runs before visualization")
+        print("- Check that run_ids parameter contains valid run identifiers")
+        print(f"- Verify that run directories exist in {results_dir}")
         return 1
 
     # Export per-run metrics and figures
