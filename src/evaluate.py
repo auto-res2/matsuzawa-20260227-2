@@ -110,12 +110,49 @@ def fetch_run_from_wandb(entity: str, project: str, run_id: str) -> Dict[str, An
     # Get most recent run
     run = runs[0]
 
+    # [VALIDATOR FIX - Attempt 1]
+    # [PROBLEM]: SummarySubDict objects from wandb API are not JSON serializable
+    # [CAUSE]: dict(run.summary) creates a dict with nested SummarySubDict values
+    # [FIX]: Recursively convert to plain dict and handle special numeric types
+    #
+    # [OLD CODE]:
+    # return {
+    #     "id": run.id,
+    #     "name": run.name,
+    #     "history": run.history(),
+    #     "summary": dict(run.summary),
+    #     "config": dict(run.config),
+    # }
+    #
+    # [NEW CODE]:
+    def convert_to_json_serializable(obj):
+        """Recursively convert wandb objects to JSON-serializable types."""
+        import math
+
+        # Handle special numeric types
+        if isinstance(obj, float):
+            if math.isnan(obj) or math.isinf(obj):
+                return str(obj)  # Convert NaN/Inf to string
+            return obj
+        elif isinstance(obj, dict):
+            return {k: convert_to_json_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_to_json_serializable(item) for item in obj]
+        elif isinstance(obj, (str, int, bool, type(None))):
+            return obj
+        elif hasattr(obj, "__dict__"):
+            # Convert objects with __dict__ to dict
+            return convert_to_json_serializable(obj.__dict__)
+        else:
+            # Fallback: convert to string for unknown types
+            return str(obj)
+
     return {
         "id": run.id,
         "name": run.name,
         "history": run.history(),
-        "summary": dict(run.summary),
-        "config": dict(run.config),
+        "summary": convert_to_json_serializable(dict(run.summary)),
+        "config": convert_to_json_serializable(dict(run.config)),
     }
 
 
